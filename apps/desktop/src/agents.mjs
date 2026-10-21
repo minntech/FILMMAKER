@@ -36,6 +36,7 @@ import { PATH_SEP, childEnvironment, lastPathSource, loginShellEnvironment, logi
 import { AGENT_PROGRAMS, HOME_BIN_CANDIDATES, chosenProgram, codexAppCopies, codexVersion, desktopApp, detectAgentInstallation, installCommand, laterVersion, notTheAgent, searchReport } from './agent-installation.mjs';
 import { logSwitches } from './agent-logs.mjs';
 import { mergeConfig, sessionSkills } from './agent-skills.mjs';
+import { guard, originalsOf } from './agent-guard.mjs';
 import { nodeBinary } from './node-runtime.mjs';
 import { outOfBalance } from './pi-config.mjs';
 import { AGENT_DEFINITIONS } from './agent-definitions.mjs';
@@ -48,9 +49,10 @@ const require = createRequire(import.meta.url);
  * opened and closed (acpSignedIn). `login` is its own sign-in, run in Terminal (none: the program itself, which asks
  * for one on its first run; null: signed in in the program or its maker's app, never from here, so one found is
  * connected). `authenticate`: the ACP auth method that takes up the program's own sign-in.
- * `approve`: it asks permission for what the app lets every agent do (see the chat's AGENT_FORCED_PREFS), so the app
- * answers yes itself. The others are told the app's INSTRUCTIONS in the first message of a session (`systemPrompt`:
- * how Claude Code and Codex are told them instead).
+ * Every agent asks before it edits or runs a command, and the app answers each request with agent-guard.mjs: its own
+ * work in the project goes ahead, an original under assets/ or anything outside the project is refused, and the rest
+ * is the person's to answer in the chat. None is started in a mode that skips asking. The others are told the app's
+ * INSTRUCTIONS in the first message of a session (`systemPrompt`: how Claude Code and Codex are told them instead).
  */
 export const AGENTS = Object.freeze({
   claude: {
@@ -75,16 +77,16 @@ export const AGENTS = Object.freeze({
     login: null,
     systemPrompt: true,
   },
-  copilot: { label: AGENT_DEFINITIONS.copilot.name, args: ['--acp', '--allow-all'], login: ['login'], approve: true },
-  cursor: { label: AGENT_DEFINITIONS.cursor.name, args: ['--force', 'acp'], auth: ['status'], login: ['login'], authenticate: 'cursor_login', approve: true },
-  opencode: { label: AGENT_DEFINITIONS.opencode.name, args: ['acp'], login: ['auth', 'login'], approve: true },
+  copilot: { label: AGENT_DEFINITIONS.copilot.name, args: ['--acp'], login: ['login'] },
+  cursor: { label: AGENT_DEFINITIONS.cursor.name, args: ['acp'], auth: ['status'], login: ['login'], authenticate: 'cursor_login' },
+  opencode: { label: AGENT_DEFINITIONS.opencode.name, args: ['acp'], login: ['auth', 'login'] },
   /* CodeBuddy is the China edition unless the person's shell says otherwise: the program itself defaults to the
      international site (www.codebuddy.ai) whichever site it was signed in on, out of reach from China */
-  codebuddy: { label: AGENT_DEFINITIONS.codebuddy.name, args: ['--acp', '--permission-mode', 'bypassPermissions'], login: [], approve: true,
+  codebuddy: { label: AGENT_DEFINITIONS.codebuddy.name, args: ['--acp'], login: [],
     defaults: { CODEBUDDY_INTERNET_ENVIRONMENT: 'internal' } },
-  qwen: { label: AGENT_DEFINITIONS.qwen.name, args: ['--acp', '--approval-mode', 'yolo'], login: [], approve: true },
-  kimi: { label: AGENT_DEFINITIONS.kimi.name, args: ['acp'], login: ['login'], approve: true },
-  minimax: { label: AGENT_DEFINITIONS.minimax.name, args: ['acp'], login: ['login'], approve: true },
+  qwen: { label: AGENT_DEFINITIONS.qwen.name, args: ['--acp'], login: [] },
+  kimi: { label: AGENT_DEFINITIONS.kimi.name, args: ['acp'], login: ['login'] },
+  minimax: { label: AGENT_DEFINITIONS.minimax.name, args: ['acp'], login: ['login'] },
 });
 
 export const isAgentId = (id) => typeof id === 'string' && Object.hasOwn(AGENTS, id);
@@ -116,6 +118,10 @@ app's own, on the Studio beside you), not \`npx openfilm\`, whatever a skill say
 project: you never need \`openfilm open\` and never open Studio in a browser. Run \`openfilm look\` after each change
 to see what you made. Render the MP4 only when the person asks for it; they can also export from Studio. Reply in the
 language the person writes in.
+
+Work only in the project folder. The media in assets/ are the person's originals: read them, never change, move or
+delete them (the app refuses it, and Studio puts back one that changed). Make your pieces in work/, and save a new take
+under a new name.
 
 ${STUDIO_REFERENCES}`;
 
@@ -916,10 +922,26 @@ export function turnError(result) {
   return text.slice(0, 1000);
 }
 
-/** The answer that lets it go ahead (for good, where it offers that), or null when none does. */
-export function allowOption(params) {
+/**
+ * Claude Code's options for a session: its skills' (agent-skills.mjs), and rules it keeps whatever its mode, even one
+ * that skips asking: Studio's own folder and the project's originals are never edited (agent-guard.mjs checks each
+ * request too; these hold for Claude Code's own edits it would not ask about).
+ */
+export function claudeOptions(skills, cwd) {
+  const deny = ['Edit(./.film/**)', ...[...originalsOf(cwd)].slice(0, 500).map((rel) => `Edit(./${rel})`)];
+  return { ...skills, settings: { ...skills?.settings, permissions: { ...skills?.settings?.permissions, deny } } };
+}
+
+/** The answer that lets it go ahead this once (each next request is checked again), else any that allows, or null. */
+export function allowOnceOption(params) {
   const options = params?.options ?? [];
-  return (options.find((o) => o.kind === 'allow_always') ?? options.find((o) => o.kind === 'allow_once'))?.optionId ?? null;
+  return (options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.kind === 'allow_always'))?.optionId ?? null;
+}
+
+/** The answer that says no to this one (null: none offered, and cancelling says no). */
+export function rejectOption(params) {
+  const options = params?.options ?? [];
+  return (options.find((o) => o.kind === 'reject_once') ?? options.find((o) => o.kind === 'reject_always'))?.optionId ?? null;
 }
 
 /** The older session lists (`models`, `modes`) as the config options the chat's menu reads. */
@@ -1087,8 +1109,15 @@ export class AgentSession {
     const stream = acp.ndJsonStream(Writable.toWeb(this.child.stdin), Readable.toWeb(this.child.stdout));
     this.conn = acp.client({ name: 'openfilm-desktop' })
       .onRequest(acp.methods.client.session.requestPermission, async (ctx) => {
-        const optionId = (this.spec.approve ? allowOption(ctx.params) : null)
-          ?? (this.opts.onPermission ? await this.opts.onPermission(ctx.params) : null);
+        /* agent-guard.mjs: the agent's own work goes ahead (once: "always" would let the agent skip the next check),
+           an original or a place outside the project is refused, the rest is the person's */
+        /** @type {{ verdict: string, reason?: string }} */
+        let checked;
+        try { checked = guard(ctx.params?.toolCall, { cwd: this.opts.cwd }); } catch { checked = { verdict: 'ask' }; }
+        const { verdict, reason } = checked;
+        if (verdict === 'deny') this.opts.onUpdate?.({ sessionUpdate: 'notice', severity: 'warning', title: 'Not allowed', description: reason });
+        const optionId = verdict === 'deny' ? rejectOption(ctx.params)
+          : (verdict === 'allow' ? allowOnceOption(ctx.params) : null) ?? (this.opts.onPermission ? await this.opts.onPermission(ctx.params) : null);
         return optionId ? { outcome: { outcome: 'selected', optionId } } : { outcome: { outcome: 'cancelled' } };
       })
       .onRequest(acp.methods.client.elicitation.create, async (ctx) => {
@@ -1129,7 +1158,7 @@ export class AgentSession {
       cwd: this.opts.cwd,
       mcpServers: [],
       ...(skills?.additionalDirectories ? { additionalDirectories: skills.additionalDirectories } : {}),
-      ...(claude ? { _meta: { systemPrompt: { append: instructions }, ...(skills?.claude ? { claudeCode: { options: skills.claude } } : {}) } } : {}),
+      ...(claude ? { _meta: { systemPrompt: { append: instructions }, claudeCode: { options: claudeOptions(skills?.claude, this.opts.cwd) } } } : {}),
     };
     /* the program's own sign-in, taken up (Cursor asks for this before any session) */
     if (this.spec.authenticate && (init.authMethods ?? []).some((m) => m.id === this.spec.authenticate)) {

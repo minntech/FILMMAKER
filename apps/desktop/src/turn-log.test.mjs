@@ -43,7 +43,8 @@ test('the turn log has what the agent was started with and each message as it go
   try {
     await session.start();
     const opened = session.opened;
-    assert.deepEqual(opened.command.slice(-3), ['--acp', '--approval-mode', 'yolo'], 'started as the registry starts it');
+    assert.equal(opened.command.at(-1), '--acp', 'started as the registry starts it');
+    assert.ok(!opened.command.includes('--approval-mode'), 'without its flag that skips asking: the app answers each request (agent-guard.mjs)');
     assert.equal(opened.firstMessage, INSTRUCTIONS, 'an agent with no place for them is told in its first message');
     assert.equal(opened.env.OPENFILM_HOME, '/data');
     assert.equal(opened.env.SOME_API_KEY, '(hidden)', 'a key is named, never its value');
@@ -75,7 +76,7 @@ test('in Developer mode an agent is started with its own logging switch, and the
     const { log, command } = session.opened;
     assert.equal(log.agent, 'qwen');
     assert.ok(log.dir.startsWith(join(logDir, 'qwen')));
-    assert.deepEqual(command.slice(-6), ['--acp', '--approval-mode', 'yolo', '--openai-logging', '--openai-logging-dir', log.dir], 'its own flags, then the switch');
+    assert.deepEqual(command.slice(-4), ['--acp', '--openai-logging', '--openai-logging-dir', log.dir], 'its own flag, then the switch');
     await session.prompt([{ type: 'text', text: 'hi' }]);
     const [got] = readFileSync(out, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.deepEqual(got.argv.slice(-3), ['--openai-logging', '--openai-logging-dir', log.dir]);

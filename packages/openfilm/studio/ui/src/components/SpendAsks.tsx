@@ -4,7 +4,8 @@
  * project gets it; the first answer wins and the others drop it.
  *
  * And what it tells the person: a provider whose account has no balance left for a run, the same for every provider,
- * with its own page to top it up ("Manage"). Nothing here shows an amount: that is on each provider's page.
+ * with its own page to top it up ("Manage"). Nothing here shows an amount: that is on each provider's page. And
+ * originals that changed or went missing outside Studio, put back (studio/server/originals.mjs).
  *
  * In an app with a chat (lib/host.ts `asks`) these are the chat's to show, above its composer, where the person talks
  * to the agent: Studio words them and leaves the rest of the window free.
@@ -33,6 +34,8 @@ export function SpendAsks({ projectId }: { projectId: string }) {
   const answerOne = React.useCallback((id: string, allow: boolean) => {
     const one = shown.current.find((a) => a.id === id);
     setAsks((list) => list.filter((a) => a.id !== id));
+    /* originals put back: told, nothing to answer */
+    if (one?.kind === 'originals') return;
     /* a notice: "Manage" opens the provider's page, "Close" only closes it */
     if (one?.kind === 'balance') {
       if (allow) void api.openBilling(one.providerId).catch(() => {});
@@ -72,6 +75,14 @@ export function SpendAsks({ projectId }: { projectId: string }) {
 
 /** A question about spending, or a notice, in the person's words. */
 function worded(ask: SpendAsk | StudioNotice, t: (path: string) => string): HostAsk {
+  if (ask.kind === 'originals') {
+    const names = (paths: string[]) => paths.map((p) => p.split('/').pop()).join(', ');
+    const body = [
+      ask.restored.length ? t('asks.originalsBody').replaceAll('{files}', names(ask.restored)) : null,
+      ask.lost.length ? t('asks.originalsLostBody').replaceAll('{files}', names(ask.lost)) : null,
+    ].filter(Boolean).join(' ');
+    return { id: ask.id, title: t('asks.originalsTitle'), body, allowLabel: t('asks.ok'), denyLabel: t('asks.close') };
+  }
   if (ask.kind !== 'video') {
     return {
       id: ask.id,

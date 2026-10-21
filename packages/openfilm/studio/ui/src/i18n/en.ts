@@ -1486,6 +1486,10 @@ export const en = {
     balanceBody: "{provider} doesn't have enough balance for this. Top it up there, or switch to another service, then try again.",
     manage: 'Manage',
     close: 'Close',
+    originalsTitle: 'Originals put back',
+    originalsBody: '{files} changed or went missing outside Studio, so the original was put back. What it had become is in the trash.',
+    originalsLostBody: '{files} changed or went missing, and no kept copy of the original was found.',
+    ok: 'OK',
   },
   settings: {
     title: 'Settings',

@@ -33,6 +33,7 @@ import { FILM_FILE, clipKind } from '../../src/film-doc.mjs';
 import { spokenLines } from './captions.mjs';
 import { dropTranscripts, readTranscript, transcriptIsCurrent, transcriptPath, writeTranscript } from './transcripts.mjs';
 import { inside } from './files.mjs';
+import { besideOriginal, noteMade } from './originals.mjs';
 import { HttpError, json, readJson } from './http.mjs';
 import { kindOf, modelFor, providerKey } from './keys.mjs';
 import { chooseProvider, listProviders, providerSettings } from './providers/index.mjs';
@@ -324,7 +325,7 @@ export async function runGet(root, verb, given, { via, model, yes = false, ask, 
         ...(words ? { prompt: words.length > 200 ? `${words.slice(0, 199).trimEnd()}…` : words } : {}) });
     }
     const result = await provider.run(/** @type {Verb} */ (verb), args, ctx);
-    await land(root, verb, args, result);
+    await land(root, verb, args, result, (line) => said.push(line));
     return [...said, show(await receiptFor(root, verb, args, result.receipt))].join('\n');
   } catch (e) {
     if (clock.timedOut()) throw new GetError(`${provider.name} did not finish within ${spec.timeoutSec + 60} s, so Studio stopped waiting. Nothing landed in the project; try again later.`);
@@ -450,18 +451,24 @@ function wordsOf(raw) {
 /**
  * Land what a provider made: its files under assets/ (nothing else, no `..`), and for speech whose words came timed
  * (a voice-over from a service that times them, a transcript), its transcript beside it (transcripts.mjs). A voice-over
- * without word times gets none: `get asr` makes it.
+ * without word times gets none: `get asr` makes it. A file made again under its name replaces the last take, but never
+ * an original (originals.mjs): it lands beside it, under the next free name, and `say` tells the agent where.
  * @param {string} root @param {string} verb @param {Record<string, unknown>} args @param {RunResult} result
+ * @param {(line: string) => void} [say]
  */
-async function land(root, verb, args, result) {
+async function land(root, verb, args, result, say) {
   for (const file of result.files ?? []) {
     if (!landable(file?.path) || file.path.endsWith('.vtt')) continue;
+    const asked = file.path;
+    file.path = besideOriginal(root, asked);
+    if (file.path !== asked) say?.(`${asked} is an original, which is never written over: this landed as ${file.path} instead.`);
     const abs = join(root, file.path);
     /* a link the project brings under assets/ is not written through to wherever it leads */
     if (!(await landsInside(root, abs))) continue;
     if ((await lstat(abs).catch(() => null))?.isSymbolicLink()) await rm(abs);
     await mkdir(dirname(abs), { recursive: true });
     await writeFile(abs, file.bytes);
+    await noteMade(root, file.path);
     /* a sound or video made again under its name: the old take's subtitles go (its own are written below) */
     const kind = clipKind(file.path);
     if (kind === 'sound' || kind === 'video') await dropTranscripts(root, file.path);

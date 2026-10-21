@@ -1486,6 +1486,10 @@ export const zhCN: Words = {
     balanceBody: '{provider} 的余额不足，请去那边充值或切换服务后再试。',
     manage: '管理',
     close: '关闭',
+    originalsTitle: '已恢复原始文件',
+    originalsBody: '{files} 在 Studio 之外被修改或删除，已恢复原始文件。被改动后的文件在回收站中。',
+    originalsLostBody: '{files} 被修改或删除，且未找到原始文件的保留副本。',
+    ok: '好',
   },
   settings: {
     title: '设置',

@@ -21,6 +21,7 @@ import { chmod, copyFile, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { debuglog, promisify } from 'node:util';
 import { replaceFile, tempPath, writeAtomic } from './atomic.mjs';
+import { readRegistry } from './originals.mjs';
 import { isMediaFile } from './closure.mjs';
 import { TOOL_DIR } from './projects.mjs';
 
@@ -432,16 +433,26 @@ export async function keepFiles(repo, files, head, progress) {
 /**
  * Put `version`'s files in the folder, those of `paths` only (all by default), each only when it differs: blobs
  * from git, media cloned from the store (or from a file of the folder with the same content, when the store lost it).
- * Nothing else is touched, and nothing is deleted. Returns the paths written, and the media that could not be found.
+ * Nothing else is touched, and nothing is deleted. An original (originals.mjs) is never written over: one the version
+ * holds as it came is put back (and locked), one it holds otherwise is left as it is (`originals`). Returns the paths
+ * written, the media that could not be found, and the originals left as they are.
  * @param {Repo} repo @param {Version} version @param {{ paths?: Iterable<string>, progress?: Progress }} [o]
  */
 export async function writeFiles(repo, version, { paths, progress } = {}) {
+  const originals = readRegistry(repo.root).files;
+  /** @type {string[]} */
+  const kept = [];
   const wanted = [...(paths ?? version.keys())].filter((rel) => version.has(rel));
+  /** whether the version may put its file at `rel`: no original there, or the version holds it as it came */
+  const writable = (/** @type {string} */ rel) => {
+    const original = originals[rel];
+    return !original || Boolean(original.removed) || version.get(rel)?.media?.sha256 === original.sha256;
+  };
   /** @type {string[]} */
   const differ = [];
   let done = 0;
   for (const rel of wanted) {
-    if (!(await sameAs(repo, rel, version.get(rel)))) differ.push(rel);
+    if (!(await sameAs(repo, rel, version.get(rel)))) (writable(rel) ? differ : kept).push(rel);
     progress?.({ phase: 'scan', done: ++done, total: wanted.length });
   }
   const blobs = await readBlobs(repo, differ.filter((rel) => !version.get(rel)?.media).map((rel) => /** @type {Entry} */ (version.get(rel)).oid));
@@ -461,11 +472,14 @@ export async function writeFiles(repo, version, { paths, progress } = {}) {
       try {
         await cloneFile(from, tmp);
         await chmod(tmp, mode);
+        /* an original changed since (read-only on disk, which Windows will not rename over) put back as it came */
+        if (originals[rel]) await chmod(target, 0o644).catch(() => {});
         await replaceFile(tmp, target);
       } catch (e) {
         await rm(tmp, { force: true });
         throw e;
       }
+      if (originals[rel] && !originals[rel].removed) await chmod(target, 0o444).catch(() => {});
       const st = await repo.hashes.stat(rel);
       if (st) repo.hashes.know(rel, st, { sha256: entry.media.sha256 });
     } else {
@@ -479,7 +493,7 @@ export async function writeFiles(repo, version, { paths, progress } = {}) {
     progress?.({ phase: 'write', done: ++done, total: differ.length });
   }
   await repo.hashes.save();
-  return { written, missing };
+  return { written, missing, originals: kept };
 }
 
 /** @type {Map<string, string>} the text of blobs read for the closure, by id (a blob never changes) */

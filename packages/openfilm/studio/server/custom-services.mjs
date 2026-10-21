@@ -20,6 +20,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { clipKind } from '../../src/film-doc.mjs';
 import { inside } from './files.mjs';
+import { besideOriginal, noteMade } from './originals.mjs';
 import { dropTranscripts } from './transcripts.mjs';
 
 /**
@@ -248,12 +249,14 @@ export async function callService(root, service, args, signal) {
   if (text !== null) {
     text = hide(text);
     if (text.length <= MAX_SHOWN_CHARS) return `${head}:\n${text}`;
-    const rel = `${dir}/${name}${type.includes('json') ? '.json' : '.txt'}`;
+    const rel = besideOriginal(root, `${dir}/${name}${type.includes('json') ? '.json' : '.txt'}`);
     await land(root, rel, Readable.from([text]));
     return `${head}, ${Math.round(text.length / 1000)} k characters, saved as ${rel}. Its start:\n${text.slice(0, 4000)}`;
   }
-  const rel = `${dir}/${name}${extFor(type)}`;
+  /* never over an original (originals.mjs): beside it */
+  const rel = besideOriginal(root, `${dir}/${name}${extFor(type)}`);
   const size = await land(root, rel, stream ?? Readable.fromWeb(/** @type {import('node:stream/web').ReadableStream} */ (res.body)), signal);
+  await noteMade(root, rel);
   /* a sound or video saved over the last one: the old take's subtitles are not this one's */
   const kind = clipKind(rel);
   if (kind === 'sound' || kind === 'video') await dropTranscripts(root, rel);

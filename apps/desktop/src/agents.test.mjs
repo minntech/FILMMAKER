@@ -1,17 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason } from './agents.mjs';
+import { AgentSession, CLIENT_CAPABILITIES, agentDefaults, closeEverySession, planProblem, probeFolder, CODEX_UTF8_CMD, agentShell, allowOnceOption, rejectOption, codexDeveloperInstructions, codexLaunchEnv, distinctOptions, errorCause, legacyOptions, powerShellScript, powerShellLine, powerShellWindowLaunch, terminalScript, checkAgentProgram, readAgentStatus, setChosenPaths, signInScript, turnError, signInError, codexTooOld, AGENTS, ownSignIn, codexServiceError, codexRefusal, codexNotice, explainFailure, stderrReason } from './agents.mjs';
 
-test('an agent that asks: yes for good where it offers that, else yes this once; nothing to say yes with is null', () => {
+test('an agent that asks: yes this once (each request is checked again), else yes for good; no said with its reject; none is null', () => {
   const options = [
     { optionId: 'no', kind: 'reject_once' },
     { optionId: 'once', kind: 'allow_once' },
     { optionId: 'always', kind: 'allow_always' },
   ];
-  assert.equal(allowOption({ options }), 'always');
-  assert.equal(allowOption({ options: options.slice(0, 2) }), 'once');
-  assert.equal(allowOption({ options: options.slice(0, 1) }), null);
-  assert.equal(allowOption({}), null);
+  assert.equal(allowOnceOption({ options }), 'once', 'once: the next request is checked again');
+  assert.equal(allowOnceOption({ options: [options[0], options[2]] }), 'always', 'when it offers no other');
+  assert.equal(allowOnceOption({ options: options.slice(0, 1) }), null);
+  assert.equal(allowOnceOption({}), null);
+  assert.equal(rejectOption({ options }), 'no');
+  assert.equal(rejectOption({ options: options.slice(1) }), null);
 });
 
 test("the protocol's older model and mode lists read as the config options the chat's menu has", () => {

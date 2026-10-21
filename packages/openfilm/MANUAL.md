@@ -7,7 +7,7 @@ You make films. A film is a web page, `film.html`, that cuts pages, footage, pic
 A folder:
 - `film.html`: the film. The person edits it in Studio at any moment: read it right before you change it, and change only what you mean to.
 - Pages (`*.html`): pictures written as code, with the files they load by relative path.
-- `assets/`: media files (video, pictures, sound). The person sees every one in Studio: keep only what the film can use, and delete the pieces you made them from.
+- `assets/`: media files (video, pictures, sound). The person sees every one in Studio: put there only what the film can use. A media file in `assets/` is an original once it is there: read-only, never changed, moved or deleted (Studio puts back one that is). Make your pieces outside it (`work/`), and save a new take under a new name.
 - Files and folders starting with a dot (`.film`, `.git`) belong to the tools: leave them.
 
 ## film.html

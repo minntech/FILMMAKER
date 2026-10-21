@@ -1485,6 +1485,10 @@ export const es: Words = {
     balanceBody: '{provider} no tiene saldo suficiente para esto. Recárgalo allí o cambia a otro servicio y vuelve a intentarlo.',
     manage: 'Gestionar',
     close: 'Cerrar',
+    originalsTitle: 'Originales restaurados',
+    originalsBody: '{files} cambió o desapareció fuera de Studio, así que se restauró el original. Lo que había quedado está en la papelera.',
+    originalsLostBody: '{files} cambió o desapareció, y no se encontró ninguna copia guardada del original.',
+    ok: 'Aceptar',
   },
   settings: {
     title: 'Configuración',

@@ -1485,6 +1485,10 @@ export const ja: Words = {
     balanceBody: '{provider} の残高が足りません。そちらでチャージするか、別のサービスに切り替えてから、もう一度お試しください。',
     manage: '管理',
     close: '閉じる',
+    originalsTitle: '元のファイルを戻しました',
+    originalsBody: '{files} が Studio の外で変更または削除されたため、元のファイルを戻しました。変更後のファイルはゴミ箱にあります。',
+    originalsLostBody: '{files} が変更または削除されましたが、元のファイルの保管コピーが見つかりませんでした。',
+    ok: 'OK',
   },
   settings: {
     title: '設定',

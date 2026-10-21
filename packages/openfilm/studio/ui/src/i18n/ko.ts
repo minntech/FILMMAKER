@@ -1484,6 +1484,10 @@ export const ko: Words = {
     balanceBody: '{provider}의 잔액이 부족합니다. 그곳에서 충전하거나 다른 서비스로 바꾼 뒤 다시 시도하세요.',
     manage: '관리',
     close: '닫기',
+    originalsTitle: '원본을 되돌렸습니다',
+    originalsBody: '{files}이(가) Studio 밖에서 변경되거나 사라져 원본을 되돌렸습니다. 바뀐 파일은 휴지통에 있습니다.',
+    originalsLostBody: '{files}이(가) 변경되거나 사라졌지만, 원본의 보관 사본을 찾지 못했습니다.',
+    ok: '확인',
   },
   settings: {
     title: '설정',

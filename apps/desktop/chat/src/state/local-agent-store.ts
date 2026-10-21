@@ -218,18 +218,18 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
 }));
 
 /**
- * What the app sets for every agent and the menu does not offer: full access (it works in the person's own project
- * folder, every step is in the edit and version history and can be undone; clicking "Allow" a dozen times a turn
- * protects nothing). Ids differ between the adapters; an option a session does not have is skipped. The other agents
- * are started with it (their own flags, apps/desktop/src/agents.mjs), except Kimi and MiniMax Code, whose ACP servers
- * take no flag.
+ * What the app sets for every agent and the menu does not offer: a mode in which it asks before it edits or runs a
+ * command, so each request reaches the app's guard (apps/desktop/src/agent-guard.mjs). The guard answers the agent's
+ * own work in the project itself (no clicking "Allow" a dozen times a turn), refuses an original under assets/ or a
+ * place outside the project, and leaves only the rest to the person. Codex keeps its sandbox: it writes in the project
+ * alone, and asks the app for anything beyond it. Ids differ between the adapters; an option a session does not have is
+ * skipped. The other agents are started without their flags that skip asking (agents.mjs).
  */
 const AGENT_FORCED_PREFS: Partial<Record<LocalAgentId, Record<string, unknown>>> = {
-  claude: { mode: 'bypassPermissions' },
-  codex: { mode: 'agent-full-access' },
-  kimi: { mode: 'yolo' },
-  minimax: { permissionMode: 'bypassPermissions' },
-  byok: { mode: 'agent-full-access' },
+  claude: { mode: 'default' },
+  codex: { mode: 'read-only' },
+  kimi: { mode: 'default' },
+  minimax: { permissionMode: 'default' },
 };
 
 /** picks the menu no longer offers: plan mode (Claude Code's `plan`, Codex's collaboration mode) */
@@ -243,7 +243,7 @@ const DROPPED_PREFS = new Set(['plan', 'collaboration_mode']);
 export function effectivePrefs(prefs: Persisted['prefs'], agent: LocalAgentId, roster?: RosterAgent[] | null, options?: ConfigOptions): Record<string, unknown> {
   /* "default" was a row the menu no longer offers (the agents name their default for what it is): the agent's own
      current value stands instead. A mode picked once (plan mode, offered for a while) is not kept: every agent works
-     with full access. A pick the agent no longer offers (a model gone in its update, one the own key no longer names)
+     in the mode the app sets (AGENT_FORCED_PREFS). A pick the agent no longer offers (a model gone in its update, one the own key no longer names)
      is not kept either: the agent's own stands instead */
   const offers = (id: string, value: unknown) => {
     const option = options?.find((o) => o.id === id);

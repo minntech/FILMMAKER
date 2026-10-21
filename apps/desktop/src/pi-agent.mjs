@@ -32,6 +32,7 @@ import * as acp from '@agentclientprotocol/sdk';
 import { DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, createAgentSession } from '@earendil-works/pi-coding-agent';
 import { Agent, install, setGlobalDispatcher } from 'undici';
 import { agentSessionsDir, openLog } from './chat-store.mjs';
+import { guard } from './agent-guard.mjs';
 import { IMAGE_BUDGET, THINKING, TOO_LARGE, WAIT_MINUTES, contextUsed, effortOption, fitImages, modelOption, modelsJson, providerOf, retryNotice, stopReason, toolCall, toolContent } from './pi-config.mjs';
 
 /* stdout is the protocol's: anything else Pi or a library prints goes to stderr */
@@ -149,6 +150,15 @@ async function open(client, cwd, resumeId) {
         pi.on('context_with_system', (event) => { pending = { startedAt: Date.now(), messages: event.messages }; });
       } },
       { name: 'openfilm-ask', hidden: true, factory: (pi) => pi.registerTool(askTool(client, () => sessionId)) },
+      /* every tool call checked before it runs (agent-guard.mjs): an original or a place outside the project is refused,
+         and what the person must decide is left for them to say, asked with the ask tool */
+      { name: 'openfilm-guard', hidden: true, factory: (pi) => {
+        pi.on('tool_call', (event) => {
+          const { verdict, reason } = guard(event, { cwd });
+          if (verdict === 'allow') return undefined;
+          return { block: true, reason: verdict === 'deny' ? `Not allowed: ${reason}.` : `This needs the person's yes: it ${reason}. Ask them first with the ask tool.` };
+        });
+      } },
     ],
   });
   await resourceLoader.reload();

@@ -33,10 +33,12 @@ const WRITING = /(^|[/\\])([^/\\]+\.[0-9a-f-]{8,}\.tmp|\.\d+\.\d+\.importing)$/;
  */
 
 /**
- * Watch `root`; `send` gets each change once it settles. Returns `close`.
+ * Watch `root`; `send` gets each change once it settles. `onAssets` hears that files under assets/ changed (their
+ * paths; none when the system could not say which), and once as the watch starts. Returns `close`.
  * @param {string} root @param {(event: FolderEvent) => void} send
+ * @param {(paths?: string[]) => void} [onAssets]
  */
-export function watchFolder(root, send) {
+export function watchFolder(root, send, onAssets) {
   /** @type {Set<'film' | 'files'>} */
   const pending = new Set();
   /** @type {Set<string> | null} null: some change could not say which file */
@@ -66,8 +68,13 @@ export function watchFolder(root, send) {
       if (closed) return;
       if (rev && rev !== lastRev) { lastRev = rev; send({ type: 'film', rev }); }
     }
-    if (kinds.includes('files')) send(changed ? { type: 'files', paths: [...changed] } : { type: 'files' });
+    if (kinds.includes('files')) {
+      send(changed ? { type: 'files', paths: [...changed] } : { type: 'files' });
+      const assets = changed ? [...changed].filter((p) => p === 'assets' || p.startsWith('assets/')) : null;
+      if (!assets || assets.length) onAssets?.(assets ?? undefined);
+    }
   };
+  onAssets?.();
 
   const close = watchTree(root, (name) => {
     if (closed) return;
@@ -128,14 +135,16 @@ export function watchTree(root, onChange, native = process.platform === 'darwin'
 
 /**
  * Every project someone is watching, and who: `subscribe` starts the folder's watcher with its first listener and stops
- * it with its last.
+ * it with its last. `onAssets(root, paths?)`: watchFolder's, for each project watched.
+ * @param {{ onAssets?: (root: string, paths?: string[]) => void }} [o]
  */
-export function createWatchers() {
+export function createWatchers({ onAssets } = {}) {
   /** @typedef {{ root: string, listener: (e: FolderEvent) => void }} Subscription */
   /** @type {Map<string, { close: () => void, listeners: Set<Subscription> }>} */
   const byRoot = new Map();
   /** @param {string} root @param {Set<Subscription>} listeners */
-  const start = (root, listeners) => ({ listeners, close: watchFolder(root, (e) => { for (const { listener } of listeners) listener(e); }) });
+  const start = (root, listeners) => ({ listeners, close: watchFolder(root, (e) => { for (const { listener } of listeners) listener(e); },
+    onAssets && ((paths) => onAssets(root, paths))) });
   return {
     /** @param {string} root @param {(e: FolderEvent) => void} listener */
     subscribe(root, listener) {

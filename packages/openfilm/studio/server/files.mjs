@@ -20,6 +20,7 @@ import { addLinkedPlaces, readableLink } from '../../src/media-links.mjs';
 import { readProjectFilm, writeProjectFilm } from './film.mjs';
 import { TOOL_DIR } from './projects.mjs';
 import { moveToTrash } from './trash.mjs';
+import { moving, removing } from './originals.mjs';
 import { linkKind, rewriteLinks } from './page-links.mjs';
 import { ffmpeg } from '../../src/shared.mjs';
 
@@ -390,7 +391,8 @@ export async function moveFile(root, from, asked) {
   if (existsSync(dst) && !sameEntry(src, dst)) throw new FileError(`${to} is already there`, 409);
   if (dst.startsWith(src + sep)) throw new FileError('a folder cannot go inside itself');
   await mkdir(dirname(dst), { recursive: true });
-  await rename(src, dst);
+  /* its originals recorded where they are now, in the same step (originals.mjs) */
+  await moving(root, posix(relative(root, src)), posix(relative(root, dst)), () => rename(src, dst));
   const moved = await repoint(root, posix(relative(root, src)), posix(relative(root, dst)));
   const pages = await relinkAfterMove(root, posix(relative(root, src)), posix(relative(root, dst)));
   return { path: posix(relative(root, dst)), clips: moved, pages };
@@ -464,13 +466,13 @@ export async function freezeFrame(root, rel, ms) {
 
 /**
  * Move a file or folder to the system's trash (see trash.mjs). A link is only taken away: what it leads to stays where
- * it is kept, untouched.
+ * it is kept, untouched. An original (originals.mjs) goes to the trash as any file, and its kept copy stays.
  */
 export async function trashFile(/** @type {string} */ root, /** @type {string} */ rel) {
   const abs = entryInside(root, rel);
   if (lstatSync(abs, { throwIfNoEntry: false })?.isSymbolicLink()) { await unlink(abs); return; }
   if (!existsSync(abs)) throw new FileError(`${rel} is not there`, 404);
-  await moveToTrash(abs);
+  await removing(root, posix(relative(root, abs)), () => moveToTrash(abs));
 }
 
 /* ── media kept elsewhere: copied in (cloned where the disk can) or linked (src/media-links.mjs) ── */

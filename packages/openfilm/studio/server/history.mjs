@@ -34,6 +34,7 @@ import {
 } from './history-store.mjs';
 import { TOOL_DIR } from './projects.mjs';
 import { moveToTrash } from './trash.mjs';
+import { isOriginal } from './originals.mjs';
 
 export { HistoryError };
 
@@ -413,7 +414,7 @@ export function commitChanges(root, message, { onProgress } = {}) {
 /**
  * Put the film back as the last commit holds it: its files written where they differ. A file the film takes that the
  * commit does not have (made since, beside a page) goes to the trash, as a delete in Studio does, so a discard can be
- * taken back from there; files the film does not use are left as they are.
+ * taken back from there; files the film does not use, and originals (originals.mjs), are left as they are.
  * @param {string} root @param {Options} [o]
  */
 export function discardChanges(root, { onProgress } = {}) {
@@ -424,7 +425,8 @@ export function discardChanges(root, { onProgress } = {}) {
     if (!head) throw new HistoryError('nothing is committed yet, so there is nothing to go back to', 409, 'nothing');
     await writeFiles(repo, await readVersion(repo, head), { progress });
     for (const { path, change } of (await changesNow(repo, head)).changes) {
-      if (change === 'added' && existsSync(join(root, path))) await moveToTrash(join(root, path));
+      /* an original that came in since is kept (originals.mjs): it was never the film's to take back */
+      if (change === 'added' && existsSync(join(root, path)) && !isOriginal(root, path)) await moveToTrash(join(root, path));
     }
   });
 }

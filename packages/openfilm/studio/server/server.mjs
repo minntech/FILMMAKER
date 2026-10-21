@@ -12,7 +12,7 @@
  * Both answer only requests addressed to 127.0.0.1, localhost or [::1] at their own port (ownHost): another site
  * whose name is pointed at this machine (DNS rebinding) gets nothing, not even /api/health.
  */
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +50,7 @@ import { COVER_FRAME_W, CoverError, clearCover, readCover, readCoverBody, setCov
 import { SavedError, bundlePoster, libraryPath, libraryRel, libraryRoot as savedLibrary, listLibrary, saveClip, saveFile, saveGroup, takeSaved } from './saved.mjs';
 import { FILM_FILE, clipKind, isPage } from '../../src/film-doc.mjs';
 import { moveToTrash } from './trash.mjs';
+import { SETTLED_MS, protect, sweep } from './originals.mjs';
 import { listSkills, removeSkill, setSkillCover, setSkillInstalled, setSkillOn, skillOrigins, skillsInstalled, skillsOff } from '../../src/skills.mjs';
 import { providersRoute } from './providers/index.mjs';
 import { captionRoutes } from './captions.mjs';
@@ -107,7 +108,23 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
   /** The key from either session cookie. */
   const cookieKey = (/** @type {Req} */ req) => (sameKey(cookie(req, COOKIE)) ? cookie(req, COOKIE) : cookie(req, FRAMED));
   key ??= advertise ? studioKey() : randomBytes(24).toString('hex');
-  const watchers = createWatchers();
+  /** each watched project's originals looked at as its assets change (originals.mjs): one changed or gone is put back,
+   * and its pages are told; new files still being written are looked at again once they settle */
+  /** @type {Map<string, NodeJS.Timeout>} */
+  const settling = new Map();
+  const guardOriginals = (/** @type {string} */ root, /** @type {string[] | undefined} */ paths) => {
+    void sweep(root, { paths }).then((done) => {
+      if (done.restored.length || done.lost.length) {
+        watchers.emit(root, { type: 'notice', notice: { id: randomUUID(), kind: 'originals', restored: done.restored, changed: done.changed, lost: done.lost } });
+      }
+      if (done.waiting.length && !settling.has(root)) {
+        const timer = setTimeout(() => { settling.delete(root); guardOriginals(root, undefined); }, SETTLED_MS + 1000);
+        timer.unref();
+        settling.set(root, timer);
+      }
+    }, () => {});
+  };
+  const watchers = createWatchers({ onAssets: guardOriginals });
   /** questions about spending for the person, in the pages showing a project (see get.mjs) */
   const asks = createAsks({ emit: (root, event) => watchers.emit(root, event), roots: watchers.roots });
   /** the editor pages open right now, and whether each is in sight: `/open` switches them to a project */
@@ -719,7 +736,10 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       const ask = { title: typeof title === 'string' && title.trim() ? title.trim().slice(0, 120) : 'Choose', at: null };
       const picked = Array.isArray(paths) ? paths.map(String)
         : await (folder === true ? pickFolder(ask).then((p) => (p ? [p] : [])) : pickFiles(ask)).catch((e) => { throw new HttpError(501, String(e?.message ?? e)); });
-      return json(res, 200, { landed: await bringIn(project.path, String(into ?? 'assets'), picked, how) });
+      const landed = await bringIn(project.path, String(into ?? 'assets'), picked, how);
+      /* copies are originals (originals.mjs); a link's original stays where it is kept, never written */
+      if (how === 'copy') void protect(project.path, landed).catch(() => {});
+      return json(res, 200, { landed });
     }
     /* a link pointed somewhere else (files.mjs relink): the path given, else the person's pick. { path } (null: cancelled) */
     if (rest === 'files/relink' && req.method === 'POST') {
@@ -753,7 +773,9 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     /* what a link leads to copied into the project in its place (files.mjs collect) */
     if (rest === 'files/collect' && req.method === 'POST') {
       const { path: rel } = /** @type {{ path?: unknown }} */ (await readJson(req));
-      return json(res, 200, { path: await collect(project.path, String(rel ?? '')) });
+      const collected = await collect(project.path, String(rel ?? ''));
+      void protect(project.path, [collected]).catch(() => {});
+      return json(res, 200, { path: collected });
     }
     /* a video's frame made a still beside it (files.mjs freezeFrame): the timeline's freeze frame */
     if (rest === 'files/still' && req.method === 'POST') {
@@ -765,7 +787,9 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       if (req.method === 'GET') return json(res, 200, await listFiles(project.path));
       /* the body is the file itself, streamed to disk: an import of any size */
       if (req.method === 'PUT') {
-        const { path: landed } = await importFile(project.path, at, req);
+        const { path: landed, reused } = await importFile(project.path, at, req);
+        /* what came in is an original: kept as it is (originals.mjs), without keeping the import waiting */
+        if (!reused) void protect(project.path, [landed]).catch(() => {});
         /* a picture, video or sound that cannot be read (a broken or mislabelled file) is kept, and said: it would
            only fail later, as a blank tile or a clip that never plays. Read as the kind its ending says: a picture
            or a video with no picture in it (a size of 0), a sound with no sound */

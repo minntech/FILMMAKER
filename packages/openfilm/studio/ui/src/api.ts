@@ -194,7 +194,9 @@ export type SpendAsk = {
 };
 
 /** What the person is told without a question (studio/server/get.mjs): a provider with no balance left for a run. */
-export type StudioNotice = { id: string; kind: 'balance'; provider: string; providerId: string };
+export type StudioNotice = { id: string; kind: 'balance'; provider: string; providerId: string }
+  /* originals changed or gone outside Studio (studio/server/originals.mjs): `restored` put back, `lost` with no kept copy */
+  | { id: string; kind: 'originals'; restored: string[]; changed: string[]; lost: string[] };
 
 export type FolderEvent = { type: 'film'; rev: string } | { type: 'files'; paths?: string[] } | { type: 'history' } | { type: 'export'; job: ExportJob } | { type: 'open'; to: string }
   | { type: 'history-progress'; op: string; phase: string; done: number; total: number }
