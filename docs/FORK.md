@@ -1,6 +1,6 @@
 # minntech/filmmaker: fork notes
 
-Last updated: 2026-11-25 (headless Linux guardian added)
+Last updated: 2026-11-25 (headless guardian for Linux and macOS added)
 
 ## What this is
 
@@ -81,6 +81,21 @@ that case:
   work still went through, and a new project made by `grokbot` was taken over within seconds. The unit file passes
   `systemd-analyze verify`, but the service wasn't run under systemd (the container has no systemd).
 - **Limit: root or sudo undoes all of it.** The agent must sign in as a normal account.
+
+### The same on a Mac
+
+`deploy/macos/` does the same for a Mac the agent signs in to over Remote Login.
+
+- `setup.sh` creates a hidden keeper account (`_openfilmkeeper`) and a group, sets up the projects folder (default
+  `/Users/Shared/films`) and installs a launchd daemon. It refuses a root agent and warns if the agent is an
+  administrator or has sudo. `check.sh` attacks a test original as the agent and prints PASS or FAIL.
+- **The guardian runs as root on macOS**, because macOS has no narrow right like Linux's `CAP_CHOWN`.
+  `openfilm guard --own --owner <keeper> --group <group>` gives each original to the keeper.
+- On macOS it also removes ACLs from originals and their folders, so no inherited permission can get past the sticky
+  folder. Kept copies are instant APFS clones: no extra space, and fully separate from the file in `assets/`.
+- **Tested:** the root-with-`--owner` path ran here, with Linux refusing all 6 attacks as `grokbot`; the plist passes a
+  plist parser; both scripts pass a syntax check.
+- **Not yet run on a real Mac:** account creation, the launchd daemon and ACL removal.
 
 ### Test results (Linux, in the cloud)
 

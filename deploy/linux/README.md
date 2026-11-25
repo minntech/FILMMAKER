@@ -1,5 +1,7 @@
 # A Linux machine an AI agent works on
 
+For a Mac, see [deploy/macos](../macos/README.md).
+
 For a headless Linux machine where an agent (Grok, or any other) signs in over SSH and makes films with `openfilm`.
 After this setup, **the agent can never change, delete, rename or unlock an original**, meaning any media file in a project's
 `assets/`. Linux enforces it: it doesn't matter what the agent runs, or whether it follows any rule.

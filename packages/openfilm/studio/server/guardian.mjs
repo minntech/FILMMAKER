@@ -5,11 +5,14 @@
  * change is swept once it settles, every project is swept whole now and then (what a watch missed), and a project that
  * appears in the folder is taken in.
  *
- * `own`: the guardian keeps them as their keeper (originals.mjs useKeeper): run as a user of its own (deploy/linux), it
- * owns each original and the folders around it, so the agent's user cannot change one whatever it runs.
+ * `own`: the guardian keeps them as their keeper (originals.mjs useKeeper), so the agent's user cannot change one
+ * whatever it runs: `true`, this process's own user owns each original and the folders around it (Linux: a user of its
+ * own with CAP_CHOWN, deploy/linux); `{ uid, gid }`, that user does (run as root, as macOS has no such leave:
+ * deploy/macos). `idsOf` names them.
  *
  * What it does is said as one JSON line each (`log`): kept, restored, changed, lost, and errors.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { STORE_DIR, sweep, useKeeper } from './originals.mjs';
@@ -35,14 +38,32 @@ export function projectsIn(folder) {
 }
 
 /**
+ * The ids of a user, and of a group (its own primary group when none is named), as the system has them: `id`, then
+ * getent on Linux or Directory Services on macOS for a group.
+ * @param {string} user @param {string} [group] @returns {{ uid: number, gid: number }}
+ */
+export function idsOf(user, group) {
+  const read = (/** @type {string} */ cmd, /** @type {string[]} */ args) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  const uid = Number(read('id', ['-u', user]));
+  let gid = Number(read('id', ['-g', user]));
+  if (group) {
+    gid = Number(process.platform === 'darwin'
+      ? read('dscl', ['.', '-read', `/Groups/${group}`, 'PrimaryGroupID']).split(/\s+/).pop()
+      : read('getent', ['group', group]).split(':')[2]);
+  }
+  if (!Number.isInteger(uid) || !Number.isInteger(gid)) throw new Error(`no such user or group: ${user}${group ? `, ${group}` : ''}`);
+  return { uid, gid };
+}
+
+/**
  * Guard the projects in `folder` until `stop` is called.
  * @param {string} folder
- * @param {{ own?: boolean, log?: (event: object) => void, everyMs?: number, settledMs?: number }} [o]
+ * @param {{ own?: boolean | { uid: number, gid: number }, log?: (event: object) => void, everyMs?: number, settledMs?: number }} [o]
  * @returns {{ stop: () => void, settled: () => Promise<void> }} `settled`: resolves once the sweeps running now are done
  */
 export function guard(folder, { own = false, log = (e) => console.log(JSON.stringify(e)), everyMs = EVERY_MS, settledMs } = {}) {
   const root = resolve(folder);
-  if (own) useKeeper({ uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 });
+  if (own) useKeeper(own === true ? { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 } : own);
   /** @type {Map<string, { close: () => void, timer: NodeJS.Timeout | null, paths: Set<string> | null }>} */
   const watched = new Map();
   /** @type {Set<Promise<unknown>>} */

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The guardian of a projects folder's originals (openfilm guard, keeping them as their keeper), as a system daemon. It runs as root, since
+     macOS has no narrower way to give files to another user, and gives each original and the folders around it to the
+     keeper, so the agent's user cannot change, delete, rename or unlock one. setup.sh fills in the @...@ values. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.minntech.openfilm-guard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@NODE@</string>
+    <string>@REPO@/packages/openfilm/bin/openfilm.mjs</string>
+    <string>guard</string>
+    <string>@PROJECTS@</string>
+    <string>--own</string>
+    <string>--owner</string>
+    <string>@KEEPER@</string>
+    <string>--group</string>
+    <string>@GROUP@</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OPENFILM_TRASH_DIR</key>
+    <string>@PROJECTS@/.openfilm-trash</string>
+    <key>HOME</key>
+    <string>/var/root</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>/var/empty</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/var/log/openfilm-guard.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/openfilm-guard.log</string>
+</dict>
+</plist>

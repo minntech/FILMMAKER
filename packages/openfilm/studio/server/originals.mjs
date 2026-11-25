@@ -21,8 +21,8 @@
  * at; `removed` when the person deleted it in Studio (its kept copy stays in the store). Paths are relative to the
  * project, with forward slashes, under assets/.
  *
- * Kept by a keeper (`useKeeper`: `openfilm guard --own`, a service of its own user on a machine an agent works on, as
- * deploy/linux sets up): the keeper also owns each original, the project folder and every folder under assets/, which
+ * Kept by a keeper (`useKeeper`: `openfilm guard --own`, a service on a machine an agent works on, as deploy/linux and
+ * deploy/macos set up): the keeper also owns each original, the project folder and every folder under assets/, which
  * are sticky. An agent's user can then add files, but cannot write over, delete, rename or unlock an original, whatever
  * it runs: the system refuses it. The keeper's record is in the store, out of the agent's reach, and `.film/originals.json`
  * is a copy of it for Studio.
@@ -175,8 +175,19 @@ async function sha256Of(/** @type {string} */ abs) {
 
 /** Read-only for everyone (on Windows, the read-only attribute); a keeper's own, too. */
 async function lock(/** @type {string} */ abs) {
-  if (keeper) await chown(abs, keeper.uid, keeper.gid).catch(() => {});
+  if (keeper) {
+    await chown(abs, keeper.uid, keeper.gid).catch(() => {});
+    await noAcl(abs);
+  }
   await chmod(abs, 0o444).catch(() => {});
+}
+
+/**
+ * On macOS, a keeper's file or folder with no access control list: an entry inherited from the folder above (one that
+ * lets everyone delete, say) would be heard before its owner and mode, and before the sticky folder's rule.
+ */
+async function noAcl(/** @type {string} */ abs) {
+  if (process.platform === 'darwin') await run('/bin/chmod', ['-N', abs]).catch(() => {});
 }
 
 /**
@@ -189,6 +200,7 @@ async function fence(/** @type {string} */ root) {
   const { uid, gid } = keeper;
   const hold = async (/** @type {string} */ abs) => {
     await chown(abs, uid, gid).catch(() => {});
+    await noAcl(abs);
     await chmod(abs, 0o3775).catch(() => {});
   };
   await hold(root);

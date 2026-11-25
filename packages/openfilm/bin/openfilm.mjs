@@ -53,7 +53,7 @@ openfilm skill remove <name>
   The newest OpenFilm from npm, and Studio started again on it once nothing is being exported or made; pages open on
   it come back on the new version. The desktop app's Studio updates with the app, a source checkout with git pull:
   each is said instead.`,
-  guard: `openfilm guard [folder] [--own]
+  guard: `openfilm guard [folder] [--own [--owner <user> [--group <group>]]]
 
   Keeps the originals of every project in a folder (its media under assets/) with no Studio page open: for a machine
   an agent works on alone. Each one is kept once more beside the projects and made read-only; one that changes or goes
@@ -61,7 +61,9 @@ openfilm skill remove <name>
   folder  a projects folder, or one project (default: here)
   --own   keep them as their keeper: run as a user of its own with CAP_CHOWN and CAP_FOWNER (deploy/linux sets this
           up), it owns each original and the folders around it, so the agent's user cannot change, delete, rename or
-          unlock one, whatever it runs`,
+          unlock one, whatever it runs
+  --owner that user owns them instead of this one (and --group's folders): run as root, as on macOS, which has no
+          CAP_CHOWN for a user of its own (deploy/macos sets this up)`,
   doctor: `openfilm doctor
 
   Checks what OpenFilm needs here and prints a report to paste into an issue: OpenFilm's and Node's versions, the
@@ -138,6 +140,7 @@ try {
       count: { type: 'string' }, out: { type: 'string', short: 'o' }, '4k': { type: 'boolean' }, scale: { type: 'string' },
       blur: { type: 'boolean' }, samples: { type: 'string' }, shutter: { type: 'string' }, alpha: { type: 'boolean' },
       fps: { type: 'string' }, workers: { type: 'string' }, help: { type: 'boolean', short: 'h' }, own: { type: 'boolean' },
+      owner: { type: 'string' }, group: { type: 'string' },
     },
   });
 } catch (e) {
@@ -174,7 +177,8 @@ const commands = {
   skill: () => import('../src/skills-cli.mjs').then((m) => m.skillCommand(args, RUN)),
   /* runs until stopped (a service's stop, Ctrl+C) */
   guard: () => import('../studio/server/guardian.mjs').then((m) => {
-    m.guard(args[0] ?? process.cwd(), { own: Boolean(opts.own) });
+    const own = !opts.own ? false : opts.owner ? m.idsOf(opts.owner, opts.group) : true;
+    m.guard(args[0] ?? process.cwd(), { own });
     return new Promise(() => {});
   }),
   doctor: () => import('../src/doctor.mjs').then(async (m) => {
