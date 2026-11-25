@@ -1,0 +1,36 @@
+# The guardian of a projects folder's originals (openfilm guard --own), as its own user: it owns each original and the
+# folders around it, so the agent's user cannot change, delete, rename or unlock one. setup.sh fills in the @...@ values.
+[Unit]
+Description=OpenFilm guardian: keeps the originals in @PROJECTS@
+After=local-fs.target
+
+[Service]
+Type=simple
+User=@KEEPER@
+Group=@GROUP@
+ExecStart=@NODE@ @REPO@/packages/openfilm/bin/openfilm.mjs guard @PROJECTS@ --own
+Environment=OPENFILM_TRASH_DIR=@PROJECTS@/.openfilm-trash
+Environment=HOME=/var/lib/@KEEPER@
+StateDirectory=@KEEPER@
+Restart=always
+RestartSec=5
+
+# only what it needs: to own files and change their modes, and to read and write past their permissions, in the
+# projects folder alone
+AmbientCapabilities=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=@PROJECTS@
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateNetwork=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=no
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

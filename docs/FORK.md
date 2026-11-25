@@ -1,6 +1,6 @@
 # minntech/filmmaker: fork notes
 
-Last updated: 2026-11-25
+Last updated: 2026-11-25 (headless Linux guardian added)
 
 ## What this is
 
@@ -60,6 +60,27 @@ Media in a project's `assets/` are **originals**. They are never changed, moved 
    - **Agent modes changed.** No agent runs in full-access mode. Claude uses `default`, Codex uses `read-only` (its sandbox, with risky actions sent to the app), and Kimi and MiniMax use `default`. Copilot, Cursor, Qwen and CodeBuddy are started without their auto-approve flags. Claude Code also gets `permissions.deny` rules for `.film/` and for each original.
 
 The agent instructions and `MANUAL.md` now say: read originals, make working pieces in `work/`, and save a new take under a new name.
+
+### Headless Linux, with an agent over SSH (Grok)
+
+On a headless box there is no Studio page and no desktop app, so layers 4 and 5 above wouldn't run. Two pieces cover
+that case:
+
+- **`openfilm guard <projects> [--own]`** (`studio/server/guardian.mjs`) runs the sweep for every project in a folder,
+  with no browser. It watches each `assets/`, sweeps the whole folder every minute, and picks up new projects.
+- **`--own` makes Linux enforce it.** Run as its own user with `CAP_CHOWN`, `CAP_FOWNER` and `CAP_DAC_OVERRIDE`, the
+  guardian owns every original (read-only) and the folders around it (sticky, writable by a shared group). The agent's
+  user can add files, but cannot write, delete, rename or `chmod` an original, delete `assets/`, or reach the kept
+  copies. The guardian keeps its record in the store, out of the agent's reach.
+- **`deploy/linux/`** sets the box up: `setup.sh` creates the users, the folder and a systemd service, and checks that
+  the agent isn't root and has no sudo. `check.sh` attacks a test original as the agent and prints PASS or FAIL. Full
+  steps are in `deploy/linux/README.md`.
+- **Tested in a container with real users** (`grokbot` and a keeper), not on the actual box. As `grokbot`, 17
+  different attacks were refused by Linux: `rm`, `mv`, `chmod`, `chown`, `truncate`, `ffmpeg -y`, `cp` over the file,
+  `ln -f`, `rm -rf assets`, `mv assets`, Python `os.remove`, hard-link tricks, deleting the store, and `sudo`. Normal
+  work still went through, and a new project made by `grokbot` was taken over within seconds. The unit file passes
+  `systemd-analyze verify`, but the service wasn't run under systemd (the container has no systemd).
+- **Limit: root or sudo undoes all of it.** The agent must sign in as a normal account.
 
 ### Test results (Linux, in the cloud)
 

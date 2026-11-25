@@ -20,11 +20,17 @@
  * The record is `.film/originals.json`: by path, each original's SHA-256, size and how it was on disk when last looked
  * at; `removed` when the person deleted it in Studio (its kept copy stays in the store). Paths are relative to the
  * project, with forward slashes, under assets/.
+ *
+ * Kept by a keeper (`useKeeper`: `openfilm guard --own`, a service of its own user on a machine an agent works on, as
+ * deploy/linux sets up): the keeper also owns each original, the project folder and every folder under assets/, which
+ * are sticky. An agent's user can then add files, but cannot write over, delete, rename or unlock an original, whatever
+ * it runs: the system refuses it. The keeper's record is in the store, out of the agent's reach, and `.film/originals.json`
+ * is a copy of it for Studio.
  */
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants, createReadStream, existsSync, readFileSync, realpathSync } from 'node:fs';
-import { chmod, copyFile, link, lstat, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { chmod, chown, copyFile, link, lstat, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
@@ -77,10 +83,31 @@ export function storeOf(/** @type {string} */ root) {
 /** The kept copy of the bytes with this SHA-256. */
 export const keptPath = (/** @type {string} */ root, /** @type {string} */ sha256) => join(storeOf(root), sha256.slice(0, 2), sha256);
 
+/** @type {{ uid: number, gid: number } | null} the keeper this process is, if any (useKeeper) */
+let keeper = null;
+
+/**
+ * Keep originals as their keeper: this process's user owns each one and the folders around it (with the system's
+ * leave to: CAP_CHOWN and CAP_FOWNER, as deploy/linux's service grants), and its record is kept in the store. `gid`:
+ * the group the agent's user is in, which may add files to those folders. Null: as Studio does, without owning.
+ * @param {{ uid: number, gid: number } | null} who
+ */
+export function useKeeper(who) {
+  keeper = who;
+}
+
+/** Where the record is read and written: the store's, for a keeper (out of the agent's reach), else the project's. */
+function recordPath(/** @type {string} */ root) {
+  if (!keeper) return join(root, ORIGINALS_FILE);
+  let real = root;
+  try { real = realpathSync.native(root); } catch { /* not there yet */ }
+  return join(storeOf(root), 'records', `${createHash('sha256').update(real).digest('hex').slice(0, 32)}.json`);
+}
+
 /** The record as it is on disk (none yet, or unreadable: empty). @returns {Registry} */
 export function readRegistry(/** @type {string} */ root) {
   try {
-    const raw = JSON.parse(readFileSync(join(root, ORIGINALS_FILE), 'utf8'));
+    const raw = JSON.parse(readFileSync(recordPath(root), 'utf8'));
     const files = raw?.files && typeof raw.files === 'object' ? raw.files : {};
     const made = raw?.made && typeof raw.made === 'object' ? raw.made : {};
     return { version: 1, files, made };
@@ -90,8 +117,20 @@ export function readRegistry(/** @type {string} */ root) {
 }
 
 async function writeRegistry(/** @type {string} */ root, /** @type {Registry} */ registry) {
-  await mkdir(join(root, TOOL_DIR), { recursive: true });
-  await writeAtomic(join(root, ORIGINALS_FILE), `${JSON.stringify(registry, null, 1)}\n`);
+  const text = `${JSON.stringify(registry, null, 1)}\n`;
+  if (keeper) {
+    const at = recordPath(root);
+    await mkdir(dirname(at), { recursive: true, mode: 0o700 });
+    await writeAtomic(at, text);
+  }
+  /* the project's own copy, for Studio: a keeper's is only a copy, written where Studio made .film/ already (one the
+     keeper made would be the keeper's, and Studio could not write its history there), and one it cannot write is no
+     failure */
+  if (keeper && !existsSync(join(root, TOOL_DIR))) return;
+  try {
+    await mkdir(join(root, TOOL_DIR), { recursive: true });
+    await writeAtomic(join(root, ORIGINALS_FILE), text);
+  } catch (e) { if (!keeper) throw e; }
 }
 
 /** Whether `rel` is an original of the project now (kept, and not deleted by the person). */
@@ -134,8 +173,33 @@ async function sha256Of(/** @type {string} */ abs) {
   return hash.digest('hex');
 }
 
-/** Read-only for everyone (on Windows, the read-only attribute). */
-const lock = (/** @type {string} */ abs) => chmod(abs, 0o444).catch(() => {});
+/** Read-only for everyone (on Windows, the read-only attribute); a keeper's own, too. */
+async function lock(/** @type {string} */ abs) {
+  if (keeper) await chown(abs, keeper.uid, keeper.gid).catch(() => {});
+  await chmod(abs, 0o444).catch(() => {});
+}
+
+/**
+ * A keeper's hold on the folders around the originals: the project folder and every folder under assets/ are the
+ * keeper's, writable by its group and sticky. The agent's user (in that group) adds files there, and removes or
+ * renames only its own: never an original, nor assets/ itself.
+ */
+async function fence(/** @type {string} */ root) {
+  if (!keeper) return;
+  const { uid, gid } = keeper;
+  const hold = async (/** @type {string} */ abs) => {
+    await chown(abs, uid, gid).catch(() => {});
+    await chmod(abs, 0o3775).catch(() => {});
+  };
+  await hold(root);
+  const walk = async (/** @type {string} */ abs, /** @type {number} */ depth) => {
+    await hold(abs);
+    for (const entry of await readdir(abs, { withFileTypes: true }).catch(() => [])) {
+      if (entry.isDirectory() && !entry.name.startsWith('.') && depth < 8) await walk(join(abs, entry.name), depth + 1);
+    }
+  };
+  if (existsSync(join(root, ASSETS))) await walk(join(root, ASSETS), 0);
+}
 /** Writable by its owner again, for Studio's own move to the trash. */
 const unlock = (/** @type {string} */ abs) => chmod(abs, 0o644).catch(() => {});
 
@@ -308,8 +372,10 @@ export function sweep(root, { paths, settledMs = SETTLED_MS } = {}) {
   return queued(root, async () => {
     /** @type {Sweep} */
     const out = { kept: [], restored: [], changed: [], lost: [], waiting: [] };
-    if (!existsSync(join(root, ASSETS))) return out;
     const registry = readRegistry(root);
+    /* assets/ gone with originals in it (moved away, or deleted): they are put back below */
+    if (!existsSync(join(root, ASSETS)) && !Object.values(registry.files).some((e) => !e.removed)) return out;
+    await fence(root);
     let dirty = false;
     const asked = paths ? new Set(paths.filter((p) => p.startsWith(`${ASSETS}/`))) : null;
     /* a folder's event names the folder: what is under it is asked for too */
@@ -330,7 +396,7 @@ export function sweep(root, { paths, settledMs = SETTLED_MS } = {}) {
       const sha256 = same ? entry.sha256 : await sha256Of(abs);
       if (sha256 === entry.sha256) {
         if (!same) { registry.files[rel] = await entryOf(abs, sha256); dirty = true; }
-        if (st.mode & 0o222) await lock(abs);
+        if (st.mode & 0o222 || (keeper && st.uid !== keeper.uid)) await lock(abs);
         if (!existsSync(keptPath(root, sha256))) await keep(root, abs, sha256);
         continue;
       }
